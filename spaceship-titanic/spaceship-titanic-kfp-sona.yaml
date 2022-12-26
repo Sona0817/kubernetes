@@ -1,0 +1,216 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: spaceship-titanic-pipeline-
+  annotations: {pipelines.kubeflow.org/kfp_sdk_version: 1.8.12, pipelines.kubeflow.org/pipeline_compilation_time: '2022-06-15T16:24:43.905766',
+    pipelines.kubeflow.org/pipeline_spec: '{"inputs": [{"name": "PREPROCESS_yes_no",
+      "type": "String"}, {"name": "MODE_hyp_train_test_bento", "type": "String"},
+      {"name": "TRAIN_model_name", "type": "String"}, {"name": "TRAIN_n_estimators",
+      "type": "Integer"}, {"name": "TRAIN_max_depth", "type": "Integer"}, {"name":
+      "TRAIN_min_samples_leaf", "type": "Integer"}, {"name": "TRAIN_min_samples_split",
+      "type": "Integer"}, {"name": "TEST_model_path", "type": "String"}, {"name":
+      "BENTO_model_name", "type": "String"}, {"name": "BENTO_version", "type": "Integer"}],
+      "name": "Spaceship Titanic Pipeline"}'}
+  labels: {pipelines.kubeflow.org/kfp_sdk_version: 1.8.12}
+spec:
+  entrypoint: spaceship-titanic-pipeline
+  templates:
+  - name: bento-packing
+    container:
+      args: [--data-path, /home/sona, --model-name, '{{inputs.parameters.BENTO_model_name}}',
+        --version, '{{inputs.parameters.BENTO_version}}']
+      image: sona0817/spaceship-titanic-bento:v0.0.1
+      volumeMounts:
+      - {mountPath: /home/sona, name: pipeline}
+    inputs:
+      parameters:
+      - {name: BENTO_model_name}
+      - {name: BENTO_version}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.12
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+    volumes:
+    - name: pipeline
+      persistentVolumeClaim: {claimName: workspace-demo}
+  - name: condition-1
+    dag:
+      tasks:
+      - {name: preprocess-data, template: preprocess-data}
+  - name: condition-2
+    dag:
+      tasks:
+      - {name: hyperparameter-tuning, template: hyperparameter-tuning}
+  - name: condition-3
+    inputs:
+      parameters:
+      - {name: TRAIN_max_depth}
+      - {name: TRAIN_min_samples_leaf}
+      - {name: TRAIN_min_samples_split}
+      - {name: TRAIN_model_name}
+      - {name: TRAIN_n_estimators}
+    dag:
+      tasks:
+      - name: train-model
+        template: train-model
+        arguments:
+          parameters:
+          - {name: TRAIN_max_depth, value: '{{inputs.parameters.TRAIN_max_depth}}'}
+          - {name: TRAIN_min_samples_leaf, value: '{{inputs.parameters.TRAIN_min_samples_leaf}}'}
+          - {name: TRAIN_min_samples_split, value: '{{inputs.parameters.TRAIN_min_samples_split}}'}
+          - {name: TRAIN_model_name, value: '{{inputs.parameters.TRAIN_model_name}}'}
+          - {name: TRAIN_n_estimators, value: '{{inputs.parameters.TRAIN_n_estimators}}'}
+  - name: condition-4
+    inputs:
+      parameters:
+      - {name: TEST_model_path}
+    dag:
+      tasks:
+      - name: test
+        template: test
+        arguments:
+          parameters:
+          - {name: TEST_model_path, value: '{{inputs.parameters.TEST_model_path}}'}
+  - name: condition-5
+    inputs:
+      parameters:
+      - {name: BENTO_model_name}
+      - {name: BENTO_version}
+    dag:
+      tasks:
+      - name: bento-packing
+        template: bento-packing
+        arguments:
+          parameters:
+          - {name: BENTO_model_name, value: '{{inputs.parameters.BENTO_model_name}}'}
+          - {name: BENTO_version, value: '{{inputs.parameters.BENTO_version}}'}
+  - name: hyperparameter-tuning
+    container:
+      args: [--data-path, /home/sona]
+      image: sona0817/spaceship-titanic-hyp:v0.0.1
+      volumeMounts:
+      - {mountPath: /home/sona, name: pipeline}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.12
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+    volumes:
+    - name: pipeline
+      persistentVolumeClaim: {claimName: workspace-demo}
+  - name: preprocess-data
+    container:
+      args: [--data-path, /home/sona]
+      image: sona0817/spaceship-titanic-preprocessing:v0.0.1
+      volumeMounts:
+      - {mountPath: /home/sona, name: pipeline}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.12
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+    volumes:
+    - name: pipeline
+      persistentVolumeClaim: {claimName: workspace-demo}
+  - name: spaceship-titanic-pipeline
+    inputs:
+      parameters:
+      - {name: BENTO_model_name}
+      - {name: BENTO_version}
+      - {name: MODE_hyp_train_test_bento}
+      - {name: PREPROCESS_yes_no}
+      - {name: TEST_model_path}
+      - {name: TRAIN_max_depth}
+      - {name: TRAIN_min_samples_leaf}
+      - {name: TRAIN_min_samples_split}
+      - {name: TRAIN_model_name}
+      - {name: TRAIN_n_estimators}
+    dag:
+      tasks:
+      - {name: condition-1, template: condition-1, when: '"{{inputs.parameters.PREPROCESS_yes_no}}"
+          == "yes"'}
+      - name: condition-2
+        template: condition-2
+        when: '"{{inputs.parameters.MODE_hyp_train_test_bento}}" == "hyp"'
+        dependencies: [condition-1]
+      - name: condition-3
+        template: condition-3
+        when: '"{{inputs.parameters.MODE_hyp_train_test_bento}}" == "train"'
+        dependencies: [condition-1]
+        arguments:
+          parameters:
+          - {name: TRAIN_max_depth, value: '{{inputs.parameters.TRAIN_max_depth}}'}
+          - {name: TRAIN_min_samples_leaf, value: '{{inputs.parameters.TRAIN_min_samples_leaf}}'}
+          - {name: TRAIN_min_samples_split, value: '{{inputs.parameters.TRAIN_min_samples_split}}'}
+          - {name: TRAIN_model_name, value: '{{inputs.parameters.TRAIN_model_name}}'}
+          - {name: TRAIN_n_estimators, value: '{{inputs.parameters.TRAIN_n_estimators}}'}
+      - name: condition-4
+        template: condition-4
+        when: '"{{inputs.parameters.MODE_hyp_train_test_bento}}" == "test"'
+        dependencies: [condition-1]
+        arguments:
+          parameters:
+          - {name: TEST_model_path, value: '{{inputs.parameters.TEST_model_path}}'}
+      - name: condition-5
+        template: condition-5
+        when: '"{{inputs.parameters.MODE_hyp_train_test_bento}}" == "bento"'
+        dependencies: [condition-4]
+        arguments:
+          parameters:
+          - {name: BENTO_model_name, value: '{{inputs.parameters.BENTO_model_name}}'}
+          - {name: BENTO_version, value: '{{inputs.parameters.BENTO_version}}'}
+  - name: test
+    container:
+      args: [--data-path, /home/sona, --model-path, '{{inputs.parameters.TEST_model_path}}']
+      image: sona0817/spaceship-titanic-test:v0.0.2
+      volumeMounts:
+      - {mountPath: /home/sona, name: pipeline}
+    inputs:
+      parameters:
+      - {name: TEST_model_path}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.12
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+    volumes:
+    - name: pipeline
+      persistentVolumeClaim: {claimName: workspace-demo}
+  - name: train-model
+    container:
+      args: [--data-path, /home/sona, --model-name, '{{inputs.parameters.TRAIN_model_name}}',
+        --n-estimators, '{{inputs.parameters.TRAIN_n_estimators}}', --max-depth, '{{inputs.parameters.TRAIN_max_depth}}',
+        --min-samples-leaf, '{{inputs.parameters.TRAIN_min_samples_leaf}}', --min-samples-split,
+        '{{inputs.parameters.TRAIN_min_samples_split}}']
+      image: sona0817/spaceship-titanic-train:v0.0.1
+      volumeMounts:
+      - {mountPath: /home/sona, name: pipeline}
+    inputs:
+      parameters:
+      - {name: TRAIN_max_depth}
+      - {name: TRAIN_min_samples_leaf}
+      - {name: TRAIN_min_samples_split}
+      - {name: TRAIN_model_name}
+      - {name: TRAIN_n_estimators}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.12
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+    volumes:
+    - name: pipeline
+      persistentVolumeClaim: {claimName: workspace-demo}
+  arguments:
+    parameters:
+    - {name: PREPROCESS_yes_no}
+    - {name: MODE_hyp_train_test_bento}
+    - {name: TRAIN_model_name}
+    - {name: TRAIN_n_estimators}
+    - {name: TRAIN_max_depth}
+    - {name: TRAIN_min_samples_leaf}
+    - {name: TRAIN_min_samples_split}
+    - {name: TEST_model_path}
+    - {name: BENTO_model_name}
+    - {name: BENTO_version}
+  serviceAccountName: pipeline-runner

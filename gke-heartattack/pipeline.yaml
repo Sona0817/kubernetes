@@ -1,0 +1,241 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: heart-attack-pipeline-
+  annotations: {pipelines.kubeflow.org/kfp_sdk_version: 1.8.13, pipelines.kubeflow.org/pipeline_compilation_time: '2022-09-14T14:03:57.519181',
+    pipelines.kubeflow.org/pipeline_spec: '{"inputs": [{"name": "Preprocessing", "type":
+      "Boolean"}, {"name": "Hyperparamer_Tuning", "type": "Boolean"}, {"name": "Train",
+      "type": "Boolean"}, {"name": "Test", "type": "Boolean"}, {"name": "Yatai", "type":
+      "Boolean"}, {"name": "HYPER_sweep_count", "type": "Integer"}, {"name": "TRAIN_repo_name",
+      "type": "String"}, {"name": "TEST_model_name", "type": "String"}, {"name": "TEST_model_version",
+      "type": "Integer"}, {"name": "YATAI_model_name", "type": "String"}, {"name":
+      "YATAI_model_version", "type": "Integer"}, {"name": "YATAI_api_token", "type":
+      "String"}], "name": "Heart Attack Pipeline"}'}
+  labels: {pipelines.kubeflow.org/kfp_sdk_version: 1.8.13}
+spec:
+  entrypoint: heart-attack-pipeline
+  templates:
+  - name: condition-1
+    dag:
+      tasks:
+      - {name: data-checking, template: data-checking}
+      - name: preprocessing
+        template: preprocessing
+        dependencies: [data-checking]
+  - name: condition-2
+    inputs:
+      parameters:
+      - {name: HYPER_sweep_count}
+    dag:
+      tasks:
+      - name: hyperparameter-tuning
+        template: hyperparameter-tuning
+        arguments:
+          parameters:
+          - {name: HYPER_sweep_count, value: '{{inputs.parameters.HYPER_sweep_count}}'}
+  - name: condition-3
+    inputs:
+      parameters:
+      - {name: TRAIN_repo_name}
+    dag:
+      tasks:
+      - name: train-model
+        template: train-model
+        arguments:
+          parameters:
+          - {name: TRAIN_repo_name, value: '{{inputs.parameters.TRAIN_repo_name}}'}
+  - name: condition-4
+    inputs:
+      parameters:
+      - {name: TEST_model_name}
+      - {name: TEST_model_version}
+    dag:
+      tasks:
+      - name: test-model
+        template: test-model
+        arguments:
+          parameters:
+          - {name: TEST_model_name, value: '{{inputs.parameters.TEST_model_name}}'}
+          - {name: TEST_model_version, value: '{{inputs.parameters.TEST_model_version}}'}
+  - name: condition-5
+    inputs:
+      parameters:
+      - {name: YATAI_api_token}
+      - {name: YATAI_model_name}
+      - {name: YATAI_model_version}
+    dag:
+      tasks:
+      - name: push-to-yatai
+        template: push-to-yatai
+        arguments:
+          parameters:
+          - {name: YATAI_api_token, value: '{{inputs.parameters.YATAI_api_token}}'}
+          - {name: YATAI_model_name, value: '{{inputs.parameters.YATAI_model_name}}'}
+          - {name: YATAI_model_version, value: '{{inputs.parameters.YATAI_model_version}}'}
+  - name: data-checking
+    container:
+      command: [python, data_check.py, --gcs-path, 'gs://heart-attack-dataset-sona/heart.csv']
+      image: gcr.io/galvanized-yeti-356902/heart-data_check:latest
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.13
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+  - name: heart-attack-pipeline
+    inputs:
+      parameters:
+      - {name: HYPER_sweep_count}
+      - {name: Hyperparamer_Tuning}
+      - {name: Preprocessing}
+      - {name: TEST_model_name}
+      - {name: TEST_model_version}
+      - {name: TRAIN_repo_name}
+      - {name: Test}
+      - {name: Train}
+      - {name: YATAI_api_token}
+      - {name: YATAI_model_name}
+      - {name: YATAI_model_version}
+      - {name: Yatai}
+    dag:
+      tasks:
+      - {name: condition-1, template: condition-1, when: '"{{inputs.parameters.Preprocessing}}"
+          == "True"'}
+      - name: condition-2
+        template: condition-2
+        when: '"{{inputs.parameters.Hyperparamer_Tuning}}" == "True"'
+        dependencies: [condition-1]
+        arguments:
+          parameters:
+          - {name: HYPER_sweep_count, value: '{{inputs.parameters.HYPER_sweep_count}}'}
+      - name: condition-3
+        template: condition-3
+        when: '"{{inputs.parameters.Train}}" == "True"'
+        arguments:
+          parameters:
+          - {name: TRAIN_repo_name, value: '{{inputs.parameters.TRAIN_repo_name}}'}
+      - name: condition-4
+        template: condition-4
+        when: '"{{inputs.parameters.Test}}" == "True"'
+        dependencies: [condition-3]
+        arguments:
+          parameters:
+          - {name: TEST_model_name, value: '{{inputs.parameters.TEST_model_name}}'}
+          - {name: TEST_model_version, value: '{{inputs.parameters.TEST_model_version}}'}
+      - name: condition-5
+        template: condition-5
+        when: '"{{inputs.parameters.Yatai}}" == "True"'
+        dependencies: [condition-4]
+        arguments:
+          parameters:
+          - {name: YATAI_api_token, value: '{{inputs.parameters.YATAI_api_token}}'}
+          - {name: YATAI_model_name, value: '{{inputs.parameters.YATAI_model_name}}'}
+          - {name: YATAI_model_version, value: '{{inputs.parameters.YATAI_model_version}}'}
+  - name: hyperparameter-tuning
+    container:
+      command: [python, hyperparameter.py, --pvc-root-path, /home/sona, --sweep-count,
+        '{{inputs.parameters.HYPER_sweep_count}}']
+      image: gcr.io/galvanized-yeti-356902/heart-hyperparameter:latest
+      volumeMounts:
+      - {mountPath: /home/sona, name: pipeline}
+    inputs:
+      parameters:
+      - {name: HYPER_sweep_count}
+    outputs:
+      artifacts:
+      - {name: mlpipeline-ui-metadata, path: /mlpipeline-ui-metadata.json}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.13
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+    volumes:
+    - name: pipeline
+      persistentVolumeClaim: {claimName: heart-attack}
+  - name: preprocessing
+    container:
+      command: [python, preprocess.py, --gcs-path, 'gs://heart-attack-dataset-sona/heart.csv',
+        --pvc-root-path, /home/sona]
+      image: gcr.io/galvanized-yeti-356902/heart-preprocess:latest
+      volumeMounts:
+      - {mountPath: /home/sona, name: pipeline}
+    outputs:
+      artifacts:
+      - {name: mlpipeline-ui-metadata, path: /mlpipeline-ui-metadata.json}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.13
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+    volumes:
+    - name: pipeline
+      persistentVolumeClaim: {claimName: heart-attack}
+  - name: push-to-yatai
+    container:
+      command: [python, push.py, --model-name, '{{inputs.parameters.YATAI_model_name}}',
+        --model-version, '{{inputs.parameters.YATAI_model_version}}', --api-token,
+        '{{inputs.parameters.YATAI_api_token}}']
+      image: gcr.io/galvanized-yeti-356902/heart-yatai:latest
+    inputs:
+      parameters:
+      - {name: YATAI_api_token}
+      - {name: YATAI_model_name}
+      - {name: YATAI_model_version}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.13
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+  - name: test-model
+    container:
+      command: [python, test.py, --pvc-root-path, /home/sona, --model-name, '{{inputs.parameters.TEST_model_name}}',
+        --model-version, '{{inputs.parameters.TEST_model_version}}']
+      image: gcr.io/galvanized-yeti-356902/heart-test:latest
+      volumeMounts:
+      - {mountPath: /home/sona, name: pipeline}
+    inputs:
+      parameters:
+      - {name: TEST_model_name}
+      - {name: TEST_model_version}
+    outputs:
+      artifacts:
+      - {name: mlpipeline-ui-metadata, path: /mlpipeline-ui-metadata.json}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.13
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+    volumes:
+    - name: pipeline
+      persistentVolumeClaim: {claimName: heart-attack}
+  - name: train-model
+    container:
+      command: [python, train.py, --pvc-root-path, /home/sona, --repo-name, '{{inputs.parameters.TRAIN_repo_name}}']
+      image: gcr.io/galvanized-yeti-356902/heart-train:latest
+      volumeMounts:
+      - {mountPath: /home/sona, name: pipeline}
+    inputs:
+      parameters:
+      - {name: TRAIN_repo_name}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.13
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+    volumes:
+    - name: pipeline
+      persistentVolumeClaim: {claimName: heart-attack}
+  arguments:
+    parameters:
+    - {name: Preprocessing}
+    - {name: Hyperparamer_Tuning}
+    - {name: Train}
+    - {name: Test}
+    - {name: Yatai}
+    - {name: HYPER_sweep_count}
+    - {name: TRAIN_repo_name}
+    - {name: TEST_model_name}
+    - {name: TEST_model_version}
+    - {name: YATAI_model_name}
+    - {name: YATAI_model_version}
+    - {name: YATAI_api_token}
+  serviceAccountName: pipeline-runner

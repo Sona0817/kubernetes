@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: kubeflow-sona
+  labels:
+    app: spaceship
+  name: spaceship
+spec:
+  ports:
+  - name: predict
+    port: 5000
+    targetPort: 5000
+  selector:
+    app: spaceship
+  type: ClusterIP
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: kubeflow-sona
+  labels:
+    app: spaceship
+  name: spaceship
+spec:
+  selector:
+    matchLabels:
+      app: spaceship
+  template:
+    metadata:
+      labels:
+        app: spaceship
+    spec:
+      containers:
+      - image: sona0817/spaceship-titanic-service:v0.0.1
+        name: spaceship
+        ports:
+        - containerPort: 5000
